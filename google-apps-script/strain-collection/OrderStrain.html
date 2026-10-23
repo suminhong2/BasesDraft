@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <form id="form" class="grid" onsubmit="submitForm(event)">
+    <div>
+      <label for="strain">Strain</label>
+      <div class="inline">
+        <input id="strain" name="strain" placeholder="CB1370" required>
+        <button type="button" id="lookup" onclick="lookupCgc()">Look up on CGC</button>
+      </div>
+      <div class="hint" id="lookupStatus"></div>
+    </div>
+    <div>
+      <label for="source">Order from</label>
+      <select id="source" name="source">
+        <option>CGC</option>
+        <option>NBRP</option>
+        <option>Other lab</option>
+      </select>
+    </div>
+    <div class="full">
+      <label for="geno">Alleles / arrays</label>
+      <input id="geno" name="geno" placeholder="unc-3(e151) X">
+    </div>
+    <div>
+      <label for="grant">Grant to charge</label>
+      <select id="grant" name="grant"><option value="">Loading...</option></select>
+    </div>
+    <div class="inline">
+      <div style="flex:1">
+        <label for="quantity">Quantity</label>
+        <input id="quantity" name="quantity" type="number" min="1" value="1">
+      </div>
+      <div style="flex:1">
+        <label for="price">Price each</label>
+        <input id="price" name="price" type="number" min="0" step="0.01" placeholder="0.00">
+      </div>
+    </div>
+    <div>
+      <label for="name">Your name</label>
+      <input id="name" name="name" required>
+    </div>
+    <div>
+      <label for="email">Your email <span class="hint">(you get an email when it's ordered)</span></label>
+      <input id="email" name="email" type="email" required>
+    </div>
+    <div class="full">
+      <label for="notes">Notes</label>
+      <textarea id="notes" name="notes" placeholder="Which project it is for, how soon you need it..."></textarea>
+    </div>
+    <div class="full hint" id="info">Connecting to the order sheet...</div>
+    <div class="full buttons">
+      <button type="button" onclick="google.script.host.close()">Cancel</button>
+      <button type="submit" class="primary" id="submit">Send to the order sheet</button>
+    </div>
+    <div class="full" id="error"></div>
+  </form>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const prefill = <?!= prefill ?>;
+    $('strain').value = prefill.name || '';
+    $('geno').value = prefill.geno || '';
+    if (prefill.source) $('source').value = prefill.source;
+    try { $('name').value = localStorage.getItem('orderName') || ''; } catch (e) {}
+
+    google.script.run
+      .withSuccessHandler(info => {
+        const sel = $('grant');
+        sel.innerHTML = '';
+        sel.add(new Option('Choose a grant', ''));
+        info.grants.forEach(g => sel.add(new Option(g, g)));
+        sel.add(new Option('Not sure', 'Not sure'));
+        $('email').value = info.email || $('email').value;
+        try { if (!$('email').value) $('email').value = localStorage.getItem('orderEmail') || ''; } catch (e) {}
+        $('info').textContent = 'This adds a request to the lab order sheet. The people who place orders get an email.';
+      })
+      .withFailureHandler(err => {
+        $('info').textContent = '';
+        $('error').textContent = err.message || err;
+        $('submit').disabled = true;
+      })
+      .getOrderFormInfo();
+
+    function lookupCgc() {
+      const name = $('strain').value.trim();
+      if (!name) { $('lookupStatus').textContent = 'Type a strain name first.'; return; }
+      $('lookup').disabled = true;
+      $('lookupStatus').textContent = 'Searching the CGC...';
+      google.script.run
+        .withSuccessHandler(strain => {
+          $('lookup').disabled = false;
+          if (!strain) { $('lookupStatus').textContent = name + ' was not found on the CGC.'; return; }
+          $('strain').value = strain.name;
+          $('geno').value = strain.genotype;
+          $('source').value = 'CGC';
+          $('lookupStatus').textContent = 'Found on the CGC.';
+        })
+        .withFailureHandler(err => { $('lookup').disabled = false; $('lookupStatus').textContent = err.message || err; })
+        .lookupCgcStrain(name);
+    }
+
+    function submitForm(e) {
+      e.preventDefault();
+      const data = Object.fromEntries(new FormData($('form')).entries());
+      try { localStorage.setItem('orderName', data.name); localStorage.setItem('orderEmail', data.email); } catch (err) {}
+      const btn = $('submit');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      $('error').textContent = '';
+      google.script.run
+        .withSuccessHandler(() => google.script.host.close())
+        .withFailureHandler(err => {
+          btn.disabled = false;
+          btn.textContent = 'Send to the order sheet';
+          $('error').textContent = err.message || err;
+        })
+        .submitStrainOrder(data);
+    }
+  </script>
+</body>
+</html>
